@@ -17,9 +17,6 @@ F(T × R) = E
 Familia · Tierra · Revolución · Evolución  
 
 © 2026 – Modelo FTR / Malla Einstein-Pérez – Pérez Chávez Andrés Amaury  
+Uso únicamente bajo autorización expresa del autor.
 
-Todos los derechos reservados. Queda prohibida la reproducción, ingeniería inversa o uso comercial sin autorización escrita y firmada en persona.
-Este desarrollo está sujeto a los Términos y condiciones tanto de Google LLC, xAI, cómo de Anthropic.
-
-Let's Make the World Great Again!
-Tlaimatkitec S.A. de C.V.
+Let's Make The World Grate Again!
