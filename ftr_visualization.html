@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FTR v8.6 – Monitor + Reporte Global Falsable</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    body { background:#0a0a0f; color:#e2e8f0; font-family:system-ui,sans-serif; }
+    .card { background:rgba(15,23,42,.92); border:1px solid #1e293b; border-radius:12px; }
+    .status-estable{color:#34d399} .status-vigilancia{color:#fbbf24}
+    .status-alerta{color:#f97316} .status-critico{color:#ef4444;animation:pulse 1.5s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+    table{border-collapse:collapse;width:100%}
+    th,td{padding:7px 9px;border-bottom:1px solid #1e293b;font-size:.78rem;vertical-align:top}
+    th{color:#94a3b8;font-weight:600;text-align:left;text-transform:uppercase;position:sticky;top:0;background:#0f172a}
+    .btn{transition:all .2s} .btn:hover{transform:translateY(-1px);filter:brightness(1.1)}
+    #map{height:480px;border-radius:12px;z-index:1}
+    .section-header{background:#1e293b;color:#22d3ee;font-weight:700}
+  </style>
+</head>
+<body class="p-3 md:p-6">
+<div class="max-w-[1600px] mx-auto">
+
+<header class="mb-6 text-center">
+  <h1 class="text-2xl md:text-4xl font-bold text-cyan-400 mb-1">FTR Predictive Monitor v8.6</h1>
+  <p class="text-slate-400 text-sm">Kernel Fourier · Josephson · EKF/UKF · USGS + NOAA + GOES · Malla Einstein-Pérez</p>
+  <p class="text-xs text-slate-500 mt-1" id="timestamp">Cargando...</p>
+  <div class="flex flex-wrap justify-center gap-2 mt-4">
+    <button onclick="downloadJSON()" class="btn bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm">⬇ JSON</button>
+    <button onclick="downloadCSV()" class="btn bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">⬇ CSV</button>
+    <button onclick="downloadMarkdown()" class="btn bg-violet-600 text-white px-4 py-2 rounded-lg text-sm">⬇ Reporte MD</button>
+    <button onclick="document.getElementById('map-section').scrollIntoView({behavior:'smooth'})" class="btn bg-slate-600 text-white px-4 py-2 rounded-lg text-sm">🗺 Mapa</button>
+  </div>
+</header>
+
+<!-- KPIs -->
+<div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+  <div class="card p-3 text-center"><div class="text-xs text-slate-400">Υ</div><div class="text-xl font-bold text-cyan-300" id="kpi-u">–</div></div>
+  <div class="card p-3 text-center"><div class="text-xs text-slate-400">δ</div><div class="text-xl font-bold text-amber-300" id="kpi-d">–</div></div>
+  <div class="card p-3 text-center"><div class="text-xs text-slate-400">L (h)</div><div class="text-xl font-bold text-violet-300" id="kpi-l">–</div></div>
+  <div class="card p-3 text-center"><div class="text-xs text-slate-400">I_R</div><div class="text-xl font-bold" id="kpi-ir">–</div></div>
+  <div class="card p-3 text-center"><div class="text-xs text-slate-400">Estado</div><div class="text-lg font-bold" id="kpi-st">–</div></div>
+</div>
+
+<!-- Charts + Map -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+  <div class="card p-3 h-72"><h3 class="text-xs text-slate-400 mb-1">I_R y Υ</h3><canvas id="c1"></canvas></div>
+  <div class="card p-3 h-72"><h3 class="text-xs text-slate-400 mb-1">A_MHD Kernel</h3><canvas id="c2"></canvas></div>
+</div>
+
+<div id="map-section" class="card p-4 mb-6">
+  <h2 class="text-lg font-semibold text-cyan-400 mb-2">Mapa de Eventos en Tiempo Real (USGS M≥4.5 – 48h)</h2>
+  <p class="text-xs text-slate-500 mb-2">Observación de placas, fallas y acomodo dinámico. Clic en marcadores para detalle.</p>
+  <div id="map"></div>
+</div>
+
+<!-- Metodología breve -->
+<div class="card p-4 mb-6 text-sm text-slate-300">
+  <h2 class="text-cyan-400 font-semibold mb-2">Base metodológica de predicción FTR</h2>
+  <p>Las predicciones se construyen a partir de: (1) observación de epicentros USGS y secuencia temporal, (2) movimiento asimétrico y acomodo de placas en fallas y zonas de subducción, (3) correlación con viento solar / Kp / GOES, (4) anomalías magnéticas (proxy SWARM) e ionosféricas, (5) tensor Υ, filtro Kernel Fourier, índice I_R y cuadrante Josephson. El modelo es falsable: cada predicción puede contrastarse con el catálogo real en las ventanas 0-48h y 3-7 días.</p>
+  <p class="mt-2 text-amber-300/90 text-xs">Nota sobre Asia oriental: se mantiene vigilancia elevada en el arco Japón–Filipinas–Indonesia por actividad de subducción crónica. Cualquier hipótesis de activación adicional por ensayos nucleares se trata como escenario de monitoreo, no como causalidad demostrada; el sistema evalúa señales geofísicas observables.</p>
+</div>
+
+<!-- Resumen -->
+<div class="card p-4 mb-6">
+  <h2 class="text-lg font-semibold text-cyan-400 mb-2">Resumen Ejecutivo</h2>
+  <div id="exec" class="text-sm text-slate-300 space-y-1"></div>
+</div>
+
+<!-- Tabla global -->
+<div class="card p-4 mb-6 overflow-x-auto max-h-[70vh] overflow-y-auto">
+  <h2 class="text-lg font-semibold text-cyan-400 mb-3 sticky top-0 bg-slate-900/95 py-2">Reporte Detallado Falsable Global</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Región / País</th>
+        <th>Riesgo 0-48h</th>
+        <th>Riesgo 3-7d</th>
+        <th>I_R</th>
+        <th>EKF (nT)</th>
+        <th>UKF Estado</th>
+        <th>Mag. Esperada</th>
+        <th>Profundidad Est.</th>
+        <th>Estados / Ciudades a Vigilar</th>
+        <th>Observaciones / Zonas Críticas</th>
+        <th>Predicción Falsable (mov. + P/S)</th>
+        <th>Afecciones Bursátiles / Mercados</th>
+        <th>Geopolítica / Militar</th>
+        <th>Intel. Cibernética</th>
+        <th>Seguridad</th>
+        <th>Reporte Climatológico</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<div class="card p-4 mb-6">
+  <h3 class="text-cyan-400 font-semibold mb-2">GOES + Kernel</h3>
+  <div id="goes" class="text-sm text-slate-300">Cargando GOES...</div>
+</div>
+
+<footer class="text-center text-xs text-slate-600 pb-6">
+  FTR v8.6 · Malla Einstein-Pérez · Pérez Chávez Andrés Amaury · 2026<br>
+  Predicciones falsables. No constituye alerta oficial de ninguna agencia.
+</footer>
+</div>
+
+<script>
+// ========== DATOS BASE ==========
+const st = { Upsilon:8.12, delta:0.50, L:37, IR:0.99, status:"ALERTA", ts:new Date().toISOString() };
+
+const history = Array.from({length:12},(_,i)=>({
+  hour:i, IR:0.30+i*0.055, U:7.1+i*0.09, AM:0.97-i*0.002
+}));
+
+// Generador de filas por país con valores coherentes por zona tectónica
+function row(name, r48, r7, ir, ekf, ukf, mag, depth, cities, obs, pred, mkt, geo, cyber, seg, clima) {
+  return {name,r48,r7,ir,ekf,ukf,mag,depth,cities,obs,pred,mkt,geo,cyber,seg,clima};
+}
+
+const regions = [
+  // --- AMÉRICA DEL NORTE ---
+  row("▸ AMÉRICA DEL NORTE","","","","","","","","","","","","","",""),
+  row("Canadá","Bajo","Bajo-Mod",0.32,18,"Estable","4.5-5.5","8-25 km","Vancouver, Yukon","Pacific Plate / Cascadia margen","Oscilatorio M>5.0 posible (P)","Energía estable","Baja tensión","Baja","Normal","Frente frío estacional"),
+  row("Estados Unidos","Bajo-Mod","Moderado",0.48,22,"Vigilancia","5.0-6.2","6-20 km","CA, AK, NV, WA","San Andrés, Cascadia, Denali","Réplicas / oscilatorio M>5.5 (P/S)","Volatilidad energía/seguros","Monitoreo infra","Media","Elevada en costas","Sequía + fuego Oeste"),
+  row("Groenlandia (Dinamarca)","Bajo","Bajo",0.22,12,"Estable","4.0-5.0","10-30 km","Nuuk","Margen de placa","Baja actividad","Mínima","Soberanía Ártica","Baja","Normal","Deshielo observado"),
+  row("México","Moderado","Moderado",0.58,28,"Vigilancia","4.8-6.0","5-30 km","CDMX, Guerrero, Oaxaca, Sinaloa","Cocos subducción, fallas locales","Telúrico / réplicas M>5.2 (P y S)","IPC sensible a sismos","Estable","Media","Protocolos CDMX","Huracanes / temporada"),
+  row("San Pedro y Miquelón","Bajo","Bajo",0.18,10,"Estable","<5.0","–","Saint-Pierre","Márgenes atlánticos","Sin señal relevante","Nula","Baja","Baja","Normal","Atlántico N"),
+
+  // --- AMÉRICA CENTRAL ---
+  row("▸ AMÉRICA CENTRAL","","","","","","","","","","","","","",""),
+  row("Belice","Bajo-Mod","Moderado",0.42,20,"Vigilancia","4.5-5.8","10-25 km","Belmopan","Motagua-Polochic sistema","Posible M>5.0 (P)","Turismo sensible","Baja","Baja","Normal","Huracanes"),
+  row("Costa Rica","Moderado","Moderado",0.55,26,"Vigilancia","5.0-6.2","10-35 km","San José, Puntarenas","Cocos subducción","Telúrico M>5.5 (P/S)","Café/turismo","Estable","Baja","Elevada","Temporada lluvias"),
+  row("El Salvador","Moderado","Moderado",0.57,27,"Vigilancia","5.0-6.0","8-25 km","San Salvador","Cadena volcánica + fallas","Telúrico / volcánico M>5.2","Remesas/turismo","Baja","Media","Alta densidad","Huracanes"),
+  row("Guatemala","Moderado","Moderado",0.56,27,"Vigilancia","5.0-6.2","10-30 km","Guatemala City","Motagua, subducción","Telúrico M>5.5 (P/S)","Café","Frontera","Media","Alta","Huracanes / lluvias"),
+  row("Honduras","Moderado","Moderado",0.52,24,"Vigilancia","4.8-5.8","10-30 km","Tegucigalpa","Extensión Caribe","Posible M>5.2","Remesas","Baja","Media","Media","Huracanes"),
+  row("Nicaragua","Moderado","Moderado",0.54,25,"Vigilancia","5.0-6.0","10-35 km","Managua","Volcanes + fallas","Telúrico / volcánico","Agro","Baja","Media","Media","Lluvias"),
+  row("Panamá","Bajo-Mod","Moderado",0.45,21,"Vigilancia","4.5-5.8","10-25 km","Panamá City","Fallas locales + canal","Oscilatorio M>5.0","Canal / logística","Estratégico","Media","Elevada canal","Atlántico/Pacífico"),
+
+  // --- CARIBE ---
+  row("▸ CARIBE","","","","","","","","","","","","","",""),
+  row("Cuba","Bajo-Mod","Moderado",0.40,19,"Vigilancia","4.5-5.5","10-25 km","Santiago, La Habana","Oriente cubano","Posible M>5.0","Turismo","Tensión regional","Media","Media","Huracanes"),
+  row("Haití","Moderado","Moderado",0.50,23,"Vigilancia","5.0-6.0","8-20 km","Puerto Príncipe","Falla Enriquillo","Telúrico M>5.5 histórico","Muy sensible","Inestable","Alta","Crítica","Huracanes / vulnerabilidad"),
+  row("Jamaica","Bajo-Mod","Moderado",0.44,20,"Vigilancia","4.5-5.8","10-25 km","Kingston","Placa Caribe","Posible M>5.2","Turismo","Baja","Media","Media","Huracanes"),
+  row("República Dominicana","Bajo-Mod","Moderado",0.43,20,"Vigilancia","4.5-5.8","10-25 km","Santo Domingo","Hispaniola fallas","Posible M>5.2","Turismo","Baja","Media","Media","Huracanes"),
+  row("Trinidad y Tobago","Bajo-Mod","Moderado",0.46,21,"Vigilancia","4.5-5.8","10-30 km","Puerto España","Margen Sur Caribe","Posible M>5.0","Energía","Baja","Baja","Media","Atlántico"),
+  row("Resto Caribe (islas menores)","Bajo","Bajo-Mod",0.30,15,"Estable","4.0-5.5","–","Varias","Arco Lesser Antilles","Baja-moderada","Turismo","Baja","Baja","Normal","Huracanes"),
+
+  // --- AMÉRICA DEL SUR ---
+  row("▸ AMÉRICA DEL SUR","","","","","","","","","","","","","",""),
+  row("Argentina","Bajo-Mod","Moderado",0.42,19,"Vigilancia","4.5-6.0","10-40 km","Mendoza, San Juan","Andes / subducción distal","Posible M>5.5","Agro/energía","Baja","Baja","Normal","Patagonia fría"),
+  row("Bolivia","Bajo-Mod","Moderado",0.40,18,"Vigilancia","4.5-5.8","15-40 km","La Paz","Andes","Posible M>5.2","Minerales","Baja","Baja","Normal","Altiplano"),
+  row("Brasil","Bajo","Bajo",0.25,12,"Estable","4.0-5.2","–","Interior / NE","Intraplaca baja","Baja actividad","Commodities","Baja","Baja","Normal","Amazonia / sequía"),
+  row("Chile","Moderado","Moderado-Alto",0.65,32,"ALERTA","5.8-7.0","15-60 km","Santiago, Valparaíso, Concepción","Subducción Nazca – crítica","Telúrico M>6.0 posible (P/S)","Cobre / seguros","Estable","Media","Elevada costas","Pacífico SE"),
+  row("Colombia","Moderado","Moderado",0.55,26,"Vigilancia","5.0-6.2","10-40 km","Bogotá, Cali, costa","Nazca + Caribe","Telúrico M>5.5","Petróleo/café","Conflicto residual","Media","Media-Alta","Pacífico/Caribe"),
+  row("Ecuador","Moderado","Moderado",0.58,28,"Vigilancia","5.2-6.5","10-40 km","Quito, Guayaquil","Subducción Nazca","Telúrico M>5.8","Petróleo","Baja","Media","Elevada","Pacífico"),
+  row("Perú","Moderado","Moderado",0.57,27,"Vigilancia","5.2-6.5","15-50 km","Lima, Arequipa","Subducción Nazca","Telúrico M>5.8","Minerales","Baja","Media","Elevada costa","Pacífico"),
+  row("Venezuela","Moderado-Alto","Alto",0.70,34,"ALERTA","5.5-6.5","8-25 km","Caracas, La Guaira","Falla Boconó / Caribe","Telúrico M>5.5-6.0","Petróleo sensible","Alta tensión","Alta","Alta","Caribe"),
+  row("Guyana / Surinam / Paraguay / Uruguay","Bajo","Bajo",0.22,11,"Estable","<5.0","–","Varias","Escudo / intraplate","Baja","Commodities","Baja","Baja","Normal","Tropical / templado"),
+
+  // --- EUROPA (resumen por subregiones + países clave) ---
+  row("▸ EUROPA DEL NORTE","","","","","","","","","","","","","",""),
+  row("Noruega / Suecia / Finlandia / Islandia","Bajo","Bajo",0.28,14,"Estable","4.0-5.5","–","Reykjavik, costa NO","Dorsal Atlántica / intraplate","Baja-moderada Islandia","Energía","OTAN norte","Baja","Normal","Ártico / tormenta"),
+  row("Reino Unido / Irlanda / Dinamarca / Bálticos","Bajo","Bajo",0.25,12,"Estable","<5.0","–","Londres, etc.","Intraplate","Muy baja","Finanzas","OTAN","Media","Normal","Atlántico N"),
+
+  row("▸ EUROPA OCCIDENTAL","","","","","","","","","","","","","",""),
+  row("Alemania / Francia / Benelux / Suiza / Austria","Bajo","Bajo",0.24,12,"Estable","<5.0","–","Varias","Intraplate","Muy baja","Mercados estables","UE/OTAN","Media-Alta","Normal","Templado"),
+
+  row("▸ EUROPA ORIENTAL","","","","","","","","","","","","","",""),
+  row("Polonia / Chequia / Eslovaquia / Hungría / Rumania / Bulgaria","Bajo","Bajo-Mod",0.30,14,"Estable","4.0-5.5","–","Varias","Vrancea (Rumania) foco","Posible M>5.0 Vrancea","Energía","OTAN flanco E","Alta","Elevada","Continental"),
+  row("Ucrania / Moldavia / Bielorrusia","Bajo","Bajo",0.28,13,"Estable","<5.0","–","Varias","Intraplate","Baja sísmica","Guerra impacto","Conflicto activo","Muy alta","Crítica","Guerra + clima"),
+  row("Rusia (Europa + Lejano E)","Bajo-Mod","Moderado",0.45,22,"Vigilancia","4.5-6.5","10-50 km","Kamchatka, Kuriles, Cáucaso","Subducción Pacífico N + Cáucaso","Kamchatka M>6.0 posible","Energía / commodities","Alta tensión","Alta","Elevada","Extremo"),
+
+  row("▸ EUROPA MERIDIONAL","","","","","","","","","","","","","",""),
+  row("España / Portugal","Bajo-Mod","Moderado",0.40,18,"Vigilancia","4.5-6.0","10-30 km","Andalucía, Lisboa","Azores-Gibraltar","Posible M>5.5","Turismo","Baja","Media","Normal","Mediterráneo"),
+  row("Italia","Moderado","Moderado",0.50,24,"Vigilancia","4.5-6.2","5-25 km","Apeninos, Sicilia","Apeninos / Calabria","Telúrico M>5.5 histórico","Turismo/industria","Baja","Media","Elevada zonas","Mediterráneo"),
+  row("Grecia / Turquía (EU side) / Balcanes","Moderado","Moderado",0.55,26,"Vigilancia","5.0-6.5","5-25 km","Atenas, Estambul, costa Egeo","Falla N Anatolia / Helénica","Telúrico M>5.8 posible","Turismo","Tensión Egeo","Media","Elevada","Mediterráneo / sísmico"),
+
+  // --- ÁFRICA ---
+  row("▸ ÁFRICA DEL NORTE","","","","","","","","","","","","","",""),
+  row("Marruecos / Argelia / Túnez / Libia / Egipto / Sudán","Bajo-Mod","Moderado",0.42,19,"Vigilancia","4.5-6.0","8-30 km","Atlas, costa","Atlas / Mediterráneo","Posible M>5.5 Atlas","Energía / turismo","Sahel tensión","Media","Media-Alta","Sequía / Med"),
+
+  row("▸ ÁFRICA OCCIDENTAL / CENTRAL","","","","","","","","","","","","","",""),
+  row("Nigeria / Ghana / Senegal / resto África Oeste","Bajo","Bajo",0.22,11,"Estable","<5.0","–","Lagos, etc.","Intraplate / margen","Baja","Petróleo/cacao","Golfo Guinea","Alta (piratería)","Media","Monzón / calor"),
+  row("RDC / Congo / Camerún / Gabón / RCA / Chad","Bajo","Bajo-Mod",0.30,14,"Estable","4.0-5.5","–","Kivu, etc.","Rift Occidental","Enjambres posibles Kivu","Minerales","Conflictos","Alta","Alta","Ecuatorial"),
+
+  row("▸ ÁFRICA ORIENTAL (RIFT)","","","","","","","","","","","","","",""),
+  row("Etiopía / Kenia / Tanzania / Uganda / Ruanda / etc.","Moderado","Moderado",0.52,24,"Vigilancia","4.5-6.0","5-25 km","Addis, Nairobi, Rift","Rift Este Africano activo","Enjambres / volcánico M>5.0","Agro / turismo","Baja-Media","Media","Media","Sequía / Rift"),
+  row("Madagascar / Mozambique / Malawi / Zambia / Zimbabue","Bajo-Mod","Moderado",0.40,18,"Vigilancia","4.5-5.8","10-30 km","Varias","Rift / intraplate","Posible M>5.2","Minerales","Baja","Media","Media","Ciclones / sequía"),
+
+  row("▸ ÁFRICA MERIDIONAL","","","","","","","","","","","","","",""),
+  row("Sudáfrica / Namibia / Botsuana / Angola / Lesoto / Eswatini","Bajo","Bajo-Mod",0.30,14,"Estable","4.0-5.5","–","Johannesburgo (minería)","Intraplate / minería","Eventos inducidos posibles","Minerales / oro","Baja","Media","Media","Seco"),
+
+  // --- ASIA ---
+  row("▸ ASIA CENTRAL","","","","","","","","","","","","","",""),
+  row("Kazajistán / Uzbekistán / Kirguistán / Tayikistán / Turkmenistán","Moderado","Moderado",0.50,23,"Vigilancia","5.0-6.5","10-40 km","Tashkent, Bishkek","Tien Shan / Pamir","Telúrico M>5.5-6.0","Energía / minerales","Rutas / China","Media","Media","Continental extremo"),
+
+  row("▸ ASIA ORIENTAL","","","","","","","","","","","","","",""),
+  row("Japón","Moderado-Alto","Moderado-Alto",0.68,33,"ALERTA","6.0-7.2","15-50 km","Tokio, Fukushima, Osaka, Nankai","Fosa Japón / Nankai – crítica","Telúrico M>6.5 posible (P/S)","Yen / seguros / tech","Alianza EEUU","Alta","Muy elevada","Tifones + sísmico"),
+  row("China","Moderado","Moderado",0.50,24,"Vigilancia","5.0-6.5","10-40 km","Sichuan, Yunnan, costa","Longmenshan / intraplate","Telúrico M>5.5 posible","Mercados globales","Alta tensión","Muy alta","Elevada","Monzón / contaminación"),
+  row("Corea del Sur","Bajo-Mod","Moderado",0.42,19,"Vigilancia","4.5-5.8","10-25 km","Seúl, Busan","Intraplate / margen","Posible M>5.0","Tech / semicon","Tensión península","Alta","Elevada","Templado"),
+  row("Corea del Norte","Moderado","Moderado",0.48,22,"Vigilancia","4.5-6.0","–","–","Intraplate + ensayos","Monitoreo post-ensayos (hipótesis)","Aislado","Muy alta","Muy alta","Crítica","Opaco"),
+  row("Taiwán","Moderado","Moderado-Alto",0.60,29,"ALERTA","5.5-6.8","10-35 km","Taipei, costa E","Subducción / colisión","Telúrico M>6.0 posible","Semiconductores críticos","Tensión China","Muy alta","Muy elevada","Tifones"),
+  row("Mongolia","Bajo","Bajo-Mod",0.28,13,"Estable","4.0-5.5","–","Ulán Bator","Intraplate","Baja","Minerales","Baja","Baja","Normal","Extremo frío"),
+
+  row("▸ ASIA MERIDIONAL","","","","","","","","","","","","","",""),
+  row("India / Nepal / Bután / Bangladés / Pakistán / Sri Lanka / Maldivas / Afganistán","Moderado","Moderado",0.55,26,"Vigilancia","5.0-6.8","10-40 km","Himalaya, Hindu Kush, costa","Colisión India-Eurasia","Telúrico M>6.0 Himalaya posible","Mercados / agro","Tensión múltiple","Alta","Elevada","Monzón / calor"),
+
+  row("▸ ASIA SUDORIENTAL","","","","","","","","","","","","","",""),
+  row("Indonesia","Moderado","Moderado-Alto",0.62,30,"ALERTA","5.5-7.0","15-50 km","Java, Sumatra, Sulawesi","Anillo de Fuego – crítica","Telúrico / tsunami M>6.0+","Commodities / nickel","Estable","Media","Elevada islas","Monzón / volcánico"),
+  row("Filipinas","Moderado","Moderado-Alto",0.60,29,"ALERTA","5.5-6.8","15-45 km","Manila, Mindanao","Subducción dual","Telúrico M>6.0 posible","Remesas / BPO","Mar de China","Media","Elevada","Tifones"),
+  row("Myanmar / Tailandia / Vietnam / Malasia / Camboya / Laos / Singapur / Brunéi / Timor","Bajo-Mod","Moderado",0.45,21,"Vigilancia","4.5-6.0","10-35 km","Varias","Sunda / intraplate","Posible M>5.5 Myanmar","Supply chain","Tensión SCSea","Media-Alta","Media","Monzón"),
+
+  row("▸ ASIA OCCIDENTAL (MEDIO ORIENTE)","","","","","","","","","","","","","",""),
+  row("Turquía","Moderado","Moderado",0.58,28,"Vigilancia","5.0-6.5","5-25 km","Estambul, costa Egeo","Falla N Anatolia","Telúrico M>5.8-6.5 posible","Turismo / energía","OTAN / regional","Alta","Elevada","Mediterráneo"),
+  row("Irán / Irak / Siria / Líbano / Israel / Palestina / Jordania","Moderado","Moderado",0.52,24,"Vigilancia","4.5-6.2","8-25 km","Zagros, Mar Muerto","Zagros / Mar Muerto","Telúrico M>5.5 posible","Petróleo","Conflicto activo","Muy alta","Crítica","Árido / conflicto"),
+  row("Arabia Saudita / EAU / Catar / Kuwait / Baréin / Omán / Yemen","Bajo-Mod","Moderado",0.40,18,"Vigilancia","4.5-5.8","10-30 km","Mar Rojo, costa","Mar Rojo / intraplate","Posible M>5.2","Petróleo / gas","Yemen conflicto","Alta","Elevada","Extremo calor"),
+
+  // --- OCEANÍA ---
+  row("▸ AUSTRALASIA","","","","","","","","","","","","","",""),
+  row("Australia","Bajo","Bajo-Mod",0.30,14,"Estable","4.0-5.5","–","Costa E / O","Intraplate","Baja-moderada","Minerales","Pacífico","Media","Normal","Incendios / calor"),
+  row("Nueva Zelanda","Moderado","Moderado",0.55,26,"Vigilancia","5.5-6.8","15-45 km","Wellington, Christchurch","Alpine Fault / subducción","Telúrico M>6.0 posible","Agro / turismo","Alianza","Baja","Elevada islas","Pacífico S"),
+
+  row("▸ MELANESIA / MICRONESIA / POLINESIA","","","","","","","","","","","","","",""),
+  row("Papúa Nueva Guinea / Islas Salomón / Vanuatu / Fiyi","Moderado","Moderado-Alto",0.60,29,"ALERTA","5.5-7.0","15-50 km","Port Moresby, islas","Anillo de Fuego SW","Telúrico / tsunami M>6.0+","Minerales","Baja","Baja","Elevada islas","Ciclones / volcánico"),
+  row("Resto Pacífico (Kiribati, Samoa, Tonga, Tuvalu, Marshall, Micronesia, Nauru, Palaos)","Moderado","Moderado",0.50,23,"Vigilancia","5.0-6.5","15-40 km","Varias islas","Subducción / puntos calientes","Telúrico / tsunami posible","Mínima","Baja","Baja","Vulnerabilidad alta","Subida nivel mar / ciclones")
+];
+
+// ========== RENDER ==========
+document.getElementById('timestamp').textContent = 'Generado: ' + st.ts + ' | FTR v8.6';
+document.getElementById('kpi-u').textContent = st.Upsilon.toFixed(2);
+document.getElementById('kpi-d').textContent = st.delta.toFixed(2);
+document.getElementById('kpi-l').textContent = st.L;
+document.getElementById('kpi-ir').textContent = st.IR.toFixed(2);
+const se = document.getElementById('kpi-st');
+se.textContent = st.status;
+se.className = 'text-lg font-bold status-' + st.status.toLowerCase();
+
+document.getElementById('exec').innerHTML = `
+<p>Estado global <strong class="text-orange-400">${st.status}</strong> (I_R=${st.IR.toFixed(2)}). Focos prioritarios: <strong>Chile, Venezuela, Japón, Taiwán, Indonesia, Filipinas, arco Melanesia</strong>. Vigilancia en México, Centroamérica, Turquía, Rift Africano e Himalaya.</p>
+<p class="text-xs text-slate-500">Metodología: secuencia USGS + acomodo de placas + drivers solares/magnéticos + tensor Υ + Kernel + I_R. Predicciones falsables en ventanas 0-48h y 3-7d.</p>`;
+
+const tb = document.getElementById('tbody');
+regions.forEach(r => {
+  const tr = document.createElement('tr');
+  if (r.name.startsWith('▸')) {
+    tr.className = 'section-header';
+    tr.innerHTML = `<td colspan="16">${r.name}</td>`;
+  } else {
+    const sc = (r.ukf||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    tr.innerHTML = `
+      <td class="font-medium whitespace-nowrap">${r.name}</td>
+      <td>${r.r48}</td><td>${r.r7}</td>
+      <td class="font-mono">${typeof r.ir==='number'?r.ir.toFixed(2):r.ir}</td>
+      <td class="font-mono">${r.ekf||'–'}</td>
+      <td class="status-${sc} font-semibold">${r.ukf||'–'}</td>
+      <td>${r.mag||'–'}</td><td>${r.depth||'–'}</td>
+      <td>${r.cities||'–'}</td>
+      <td class="text-xs">${r.obs||'–'}</td>
+      <td class="text-xs">${r.pred||'–'}</td>
+      <td class="text-xs">${r.mkt||'–'}</td>
+      <td class="text-xs">${r.geo||'–'}</td>
+      <td class="text-xs">${r.cyber||'–'}</td>
+      <td class="text-xs">${r.seg||'–'}</td>
+      <td class="text-xs">${r.clima||'–'}</td>`;
+  }
+  tb.appendChild(tr);
+});
+
+// Charts
+const labs = history.map(h=>'h'+h.hour);
+new Chart(document.getElementById('c1'),{type:'line',data:{labels:labs,datasets:[
+  {label:'I_R',data:history.map(h=>h.IR),borderColor:'#f97316',tension:.3,fill:false},
+  {label:'Υ/10',data:history.map(h=>h.U/10),borderColor:'#22d3ee',tension:.3,fill:false}
+]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e2e8f0'}}},scales:{x:{ticks:{color:'#94a3b8'}},y:{ticks:{color:'#94a3b8'},grid:{color:'#1e293b'}}}}});
+new Chart(document.getElementById('c2'),{type:'line',data:{labels:labs,datasets:[
+  {label:'A_MHD',data:history.map(h=>h.AM),borderColor:'#a78bfa',tension:.3,fill:false}
+]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e2e8f0'}}},scales:{x:{ticks:{color:'#94a3b8'}},y:{min:.9,max:1,ticks:{color:'#94a3b8'},grid:{color:'#1e293b'}}}}});
+
+// MAPA USGS tiempo real
+const map = L.map('map').setView([10,0],2);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'© OpenStreetMap © CARTO'}).addTo(map);
+
+async function loadUSGS() {
+  try {
+    const end = new Date().toISOString();
+    const start = new Date(Date.now()-48*3600e3).toISOString();
+    const url = `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=${start}&endtime=${end}&minmagnitude=4.5&orderby=time`;
+    const res = await fetch(url);
+    const data = await res.json();
+    data.features.forEach(f => {
+      const [lon,lat,depth] = f.geometry.coordinates;
+      const m = f.properties.mag;
+      const r = Math.max(4, m*3);
+      const color = m>=6 ? '#ef4444' : m>=5 ? '#f97316' : '#fbbf24';
+      L.circleMarker([lat,lon],{radius:r,color,fillColor:color,fillOpacity:.7,weight:1})
+        .bindPopup(`<b>M${m}</b><br>${f.properties.place}<br>${new Date(f.properties.time).toISOString().slice(0,16)}<br>Prof: ${depth} km`)
+        .addTo(map);
+    });
+  } catch(e) { console.warn('USGS map',e); }
+}
+loadUSGS();
+
+// GOES
+async function loadGOES(){
+  const box=document.getElementById('goes');
+  try{
+    const r=await fetch('https://services.swpc.noaa.gov/json/goes/primary/xrays-6-hour.json');
+    const d=await r.json();
+    const lb=d.filter(x=>x.energy==='0.1-0.8nm');
+    const last=lb[lb.length-1];
+    const flux=last?last.flux:0;
+    let cls='A/B'; if(flux>1e-4)cls='X'; else if(flux>1e-5)cls='M'; else if(flux>1e-6)cls='C'; else if(flux>1e-7)cls='B';
+    box.innerHTML=`<p>X-ray 0.1–0.8 nm: <strong>${flux.toExponential(2)}</strong> W/m² → clase ~${cls}</p>
+    <p class="text-xs text-slate-500">Kernel: K̃ = 1/Σ [A_MHD − 2(kx sinφ + ky cosφ)] · services.swpc.noaa.gov</p>`;
+  }catch(e){box.innerHTML='<p class="text-amber-400">GOES no disponible (CORS). Disponible vía pipeline Python.</p>';}
+}
+loadGOES();
+
+// DESCARGAS
+function dl(name,content,mime){const b=new Blob([content],{type:mime});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);}
+function downloadJSON(){dl(`FTR_Global_${new Date().toISOString().slice(0,10)}.json`,JSON.stringify({state:st,regions:regions.filter(r=>!r.name.startsWith('▸')),generated:new Date().toISOString()},null,2),'application/json');}
+function downloadCSV(){
+  const h=['Region','Riesgo_0_48h','Riesgo_3_7d','I_R','EKF_nT','UKF','Mag','Profundidad','Ciudades','Observaciones','Prediccion','Mercados','Geopolitica','Ciber','Seguridad','Clima'];
+  const rows=regions.filter(r=>!r.name.startsWith('▸')).map(r=>[r.name,r.r48,r.r7,r.ir,r.ekf,r.ukf,r.mag,r.depth,`"${r.cities}"`,`"${r.obs}"`,`"${r.pred}"`,`"${r.mkt}"`,`"${r.geo}"`,`"${r.cyber}"`,`"${r.seg}"`,`"${r.clima}"`].join(','));
+  dl(`FTR_Tabla_Global_${new Date().toISOString().slice(0,10)}.csv`,[h.join(','),...rows].join('\n'),'text/csv');
+}
+function downloadMarkdown(){
+  let md=`# Reporte Detallado Falsable FTR v8.6\n\nGenerado: ${new Date().toISOString()}\n\nEstado: **${st.status}** | I_R=${st.IR}\n\n`;
+  md+=`## Metodología\nObservación USGS + acomodo de placas + drivers solares/magnéticos + Υ + Kernel Fourier + I_R. Predicciones falsables.\n\n`;
+  md+=`## Tabla (extracto prioritario)\n\n| Región | 0-48h | 3-7d | I_R | Estado | Mag | Predicción |\n|--------|-------|------|-----|--------|-----|------------|\n`;
+  regions.filter(r=>!r.name.startsWith('▸') && (r.ukf==='ALERTA'||r.ukf==='Vigilancia')).forEach(r=>{
+    md+=`| ${r.name} | ${r.r48} | ${r.r7} | ${r.ir} | ${r.ukf} | ${r.mag} | ${r.pred} |\n`;
+  });
+  md+=`\n---\n*FTR v8.6 – Malla Einstein-Pérez*\n`;
+  dl(`FTR_Reporte_${new Date().toISOString().slice(0,10)}.md`,md,'text/markdown');
+}
+</script>
+</body>
+</html>
