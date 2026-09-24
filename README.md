@@ -20,5 +20,6 @@ Familia · Tierra · Revolución · Evolución
 
 Todos los derechos reservados. Queda prohibida la reproducción, ingeniería inversa o uso comercial sin autorización escrita y firmada en persona.
 Este desarrollo está sujeto a los Términos y condiciones tanto de Google LLC, xAI, cómo de Anthropic.
+
 Let's Make the World Great Again!
 Tlaimatkitec S.A. de C.V.
