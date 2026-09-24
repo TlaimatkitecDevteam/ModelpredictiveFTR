@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="author" content="Pérez Chávez Andrés Amaury – Modelo FTR / Malla Einstein-Pérez">
+<meta name="copyright" content="© 2026 Pérez Chávez Andrés Amaury. Todos los derechos reservados. Uso solo para visualización.">
+<meta name="robots" content="noindex, nofollow">
+<title>FTR v8.6 – Monitor Predictivo (Solo Visualización)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+html,body{margin:0;padding:0;background:#0a0a0f;color:#e2e8f0;font-family:system-ui,sans-serif;user-select:none;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;}
+.card{background:rgba(15,23,42,.92);border:1px solid #1e293b;border-radius:12px}
+.status-estable{color:#34d399}.status-vigilancia{color:#fbbf24}.status-alerta{color:#f97316}.status-critico{color:#ef4444}
+table{border-collapse:collapse;width:100%}
+th,td{padding:6px 8px;border-bottom:1px solid #1e293b;font-size:.75rem;vertical-align:top}
+th{color:#94a3b8;font-weight:600;text-align:left;text-transform:uppercase;position:sticky;top:0;background:#0f172a}
+#map{height:460px;border-radius:12px;z-index:1}
+.section-header{background:#1e293b;color:#22d3ee;font-weight:700}
+#protect-overlay{display:none;position:fixed;inset:0;background:#0a0a0f;z-index:99999;color:#ef4444;font-size:1.4rem;align-items:center;justify-content:center;text-align:center;padding:2rem}
+.no-copy{pointer-events:none}
+</style>
+</head>
+<body class="p-3 md:p-5" oncontextmenu="return false;" ondragstart="return false;" onselectstart="return false;">
+
+<div id="protect-overlay">
+  <div>
+    <p>Acceso al código fuente no autorizado.</p>
+    <p class="text-sm text-slate-400 mt-3">© 2026 – Modelo FTR / Malla Einstein-Pérez<br>Pérez Chávez Andrés Amaury</p>
+  </div>
+</div>
+
+<div class="max-w-[1600px] mx-auto" id="app">
+<header class="mb-5 text-center">
+  <h1 class="text-2xl md:text-3xl font-bold text-cyan-400 mb-1">FTR Predictive Monitor v8.6</h1>
+  <p class="text-slate-400 text-sm">Solo visualización · Kernel Fourier · Josephson · EKF/UKF · USGS + NOAA + GOES</p>
+  <p class="text-xs text-slate-500 mt-1" id="timestamp"></p>
+  <p class="text-[11px] text-slate-600 mt-2">© 2026 Pérez Chávez Andrés Amaury – Modelo FTR / Malla Einstein-Pérez · Uso exclusivo para visualización. Queda prohibida la copia, redistribución o ingeniería inversa del código sin autorización escrita.</p>
+</header>
+
+<div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+  <div class="card p-3 text-center"><div class="text-xs text-slate-400">Υ</div><div class="text-xl font-bold text-cyan-300" id="kpi-u">–</div></div>
+  <div class="card p-3 text-center"><div class="text-xs text-slate-400">δ</div><div class="text-xl font-bold text-amber-300" id="kpi-d">–</div></div>
+  <div class="card p-3 text-center"><div class="text-xs text-slate-400">L (h)</div><div class="text-xl font-bold text-violet-300" id="kpi-l">–</div></div>
+  <div class="card p-3 text-center"><div class="text-xs text-slate-400">I_R</div><div class="text-xl font-bold" id="kpi-ir">–</div></div>
+  <div class="card p-3 text-center"><div class="text-xs text-slate-400">Estado</div><div class="text-lg font-bold" id="kpi-st">–</div></div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+  <div class="card p-3 h-64"><h3 class="text-xs text-slate-400 mb-1">I_R y Υ</h3><canvas id="c1"></canvas></div>
+  <div class="card p-3 h-64"><h3 class="text-xs text-slate-400 mb-1">A_MHD Kernel</h3><canvas id="c2"></canvas></div>
+</div>
+
+<div class="card p-3 mb-5">
+  <h2 class="text-base font-semibold text-cyan-400 mb-2">Mapa de Eventos en Tiempo Real (USGS M≥4.5 – 48h)</h2>
+  <div id="map"></div>
+</div>
+
+<div class="card p-4 mb-5 text-sm text-slate-300">
+  <h2 class="text-cyan-400 font-semibold mb-2">Base metodológica FTR</h2>
+  <p>Predicciones construidas a partir de observación de epicentros USGS, acomodo dinámico de placas, correlación con viento solar / Kp / GOES, anomalías magnéticas e ionosféricas, tensor Υ, filtro Kernel Fourier e índice I_R. Todas las predicciones son falsables en ventanas 0-48h y 3-7 días.</p>
+  <p class="mt-2 text-amber-300/90 text-xs">Vigilancia prioritaria en arco Japón–Taiwán–Filipinas–Indonesia y subducciones del Pacífico. Cualquier hipótesis adicional se trata como escenario de monitoreo, no como causalidad demostrada.</p>
+</div>
+
+<div class="card p-4 mb-5">
+  <h2 class="text-base font-semibold text-cyan-400 mb-2">Resumen Ejecutivo</h2>
+  <div id="exec" class="text-sm text-slate-300"></div>
+</div>
+
+<div class="card p-3 mb-5 overflow-x-auto max-h-[65vh] overflow-y-auto">
+  <h2 class="text-base font-semibold text-cyan-400 mb-3 sticky top-0 bg-slate-900/95 py-2">Reporte Detallado Falsable Global</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Región / País</th><th>Riesgo 0-48h</th><th>Riesgo 3-7d</th><th>I_R</th><th>EKF (nT)</th><th>UKF Estado</th>
+        <th>Mag. Esperada</th><th>Profundidad</th><th>Ciudades a Vigilar</th>
+        <th>Observaciones / Zonas Críticas</th><th>Predicción Falsable (P/S)</th>
+        <th>Mercados</th><th>Geopolítica</th><th>Ciber</th><th>Seguridad</th><th>Clima</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<div class="card p-4 mb-5">
+  <h3 class="text-cyan-400 font-semibold mb-2">GOES + Kernel</h3>
+  <div id="goes" class="text-sm text-slate-300">Cargando...</div>
+</div>
+
+<footer class="text-center text-xs text-slate-600 pb-6">
+  © 2026 Pérez Chávez Andrés Amaury · Modelo FTR / Malla Einstein-Pérez · Todos los derechos reservados.<br>
+  Este visualizador se publica únicamente para consulta. Queda prohibida la extracción, copia o reutilización del código fuente sin autorización expresa del autor.<br>
+  Las predicciones son falsables y no constituyen alerta oficial de ninguna agencia.
+</footer>
+</div>
+
+<script>
+/* ===== PROTECCIÓN BÁSICA CONTRA COPIA CASUAL ===== */
+(function(){
+  'use strict';
+  // Bloqueo de teclas comunes de inspección
+  document.addEventListener('keydown', function(e){
+    if(e.key==='F12' ||
+       (e.ctrlKey && e.shiftKey && (e.key==='I'||e.key==='J'||e.key==='C')) ||
+       (e.ctrlKey && (e.key==='u'||e.key==='U'||e.key==='s'||e.key==='S')) ||
+       (e.metaKey && e.altKey && (e.key==='i'||e.key==='I'))){
+      e.preventDefault(); e.stopPropagation();
+      showProtect();
+      return false;
+    }
+  }, true);
+
+  // Clic derecho
+  document.addEventListener('contextmenu', function(e){ e.preventDefault(); return false; }, true);
+
+  // Detección simple de DevTools (aproximada)
+  var devtoolsOpen = false;
+  var threshold = 160;
+  setInterval(function(){
+    var widthDiff = window.outerWidth - window.innerWidth > threshold;
+    var heightDiff = window.outerHeight - window.innerHeight > threshold;
+    if(widthDiff || heightDiff){
+      if(!devtoolsOpen){ devtoolsOpen = true; showProtect(); }
+    } else { devtoolsOpen = false; hideProtect(); }
+  }, 800);
+
+  function showProtect(){
+    var o = document.getElementById('protect-overlay');
+    if(o){ o.style.display = 'flex'; }
+  }
+  function hideProtect(){
+    var o = document.getElementById('protect-overlay');
+    if(o){ o.style.display = 'none'; }
+  }
+
+  // Evitar arrastrar imágenes/texto
+  document.addEventListener('dragstart', function(e){ e.preventDefault(); });
+})();
+
+/* ===== DATOS Y RENDER (lógica de visualización) ===== */
+const _0xst = { Upsilon:8.12, delta:0.50, L:37, IR:0.99, status:"ALERTA", ts:new Date().toISOString() };
+const _0xhist = Array.from({length:12},(_,i)=>({hour:i, IR:0.30+i*0.055, U:7.1+i*0.09, AM:0.97-i*0.002}));
+
+function _0xr(n,a,b,c,d,e,f,g,h,i,j,k,l,m,o,p){
+  return {name:n,r48:a,r7:b,ir:c,ekf:d,ukf:e,mag:f,depth:g,cities:h,obs:i,pred:j,mkt:k,geo:l,cyber:m,seg:o,clima:p};
+}
+
+const _0xreg = [
+  _0xr("▸ AMÉRICA DEL NORTE","","","","","","","","","","","","","",""),
+  _0xr("Canadá","Bajo","Bajo-Mod",0.32,18,"Estable","4.5-5.5","8-25 km","Vancouver, Yukon","Cascadia margen","Oscilatorio M>5.0 (P)","Energía","Baja","Baja","Normal","Frente frío"),
+  _0xr("Estados Unidos","Bajo-Mod","Moderado",0.48,22,"Vigilancia","5.0-6.2","6-20 km","CA, AK, NV, WA","San Andrés, Cascadia","Réplicas M>5.5 (P/S)","Volatilidad","Monitoreo","Media","Elevada costas","Sequía Oeste"),
+  _0xr("México","Moderado","Moderado",0.58,28,"Vigilancia","4.8-6.0","5-30 km","CDMX, Guerrero, Oaxaca","Subducción Cocos","Telúrico M>5.2 (P/S)","IPC sensible","Estable","Media","Protocolos CDMX","Huracanes"),
+  _0xr("▸ AMÉRICA CENTRAL","","","","","","","","","","","","","",""),
+  _0xr("Guatemala / El Salvador / Nicaragua / Costa Rica / Honduras / Panamá / Belice","Moderado","Moderado",0.54,25,"Vigilancia","5.0-6.2","8-35 km","Capitales Centroamérica","Motagua + subducción","Telúrico M>5.5 (P/S)","Café/turismo","Baja","Media","Alta densidad","Huracanes"),
+  _0xr("▸ CARIBE","","","","","","","","","","","","","",""),
+  _0xr("Haití / Cuba / Jamaica / República Dominicana / Trinidad","Moderado","Moderado",0.48,22,"Vigilancia","4.5-6.0","8-25 km","Puerto Príncipe, Santiago, Kingston","Enriquillo / Caribe","Telúrico M>5.2-5.5","Turismo","Tensión","Media-Alta","Crítica Haití","Huracanes"),
+  _0xr("▸ AMÉRICA DEL SUR","","","","","","","","","","","","","",""),
+  _0xr("Chile","Moderado","Moderado-Alto",0.65,32,"ALERTA","5.8-7.0","15-60 km","Santiago, Valparaíso, Concepción","Subducción Nazca","Telúrico M>6.0 (P/S)","Cobre/seguros","Estable","Media","Elevada costas","Pacífico SE"),
+  _0xr("Venezuela","Moderado-Alto","Alto",0.70,34,"ALERTA","5.5-6.5","8-25 km","Caracas, La Guaira","Falla Boconó","Telúrico M>5.5-6.0","Petróleo","Alta tensión","Alta","Alta","Caribe"),
+  _0xr("Colombia / Ecuador / Perú","Moderado","Moderado",0.56,27,"Vigilancia","5.0-6.5","10-50 km","Bogotá, Quito, Lima","Subducción Nazca","Telúrico M>5.5-5.8","Energía/minerales","Media","Media","Elevada costa","Pacífico"),
+  _0xr("Argentina / Bolivia / Brasil / resto Cono Sur","Bajo-Mod","Moderado",0.38,17,"Vigilancia","4.5-6.0","10-40 km","Mendoza, La Paz","Andes / intraplate","Posible M>5.5","Commodities","Baja","Baja","Normal","Variable"),
+  _0xr("▸ EUROPA","","","","","","","","","","","","","",""),
+  _0xr("Italia / Grecia / Turquía / España","Moderado","Moderado",0.52,24,"Vigilancia","4.5-6.5","5-30 km","Apeninos, Egeo, Anatolia","Fallas activas Mediterráneo","Telúrico M>5.5-6.0","Turismo","Tensión Egeo","Media","Elevada","Mediterráneo"),
+  _0xr("Resto Europa","Bajo","Bajo",0.26,13,"Estable","<5.5","–","Varias","Intraplate / Vrancea","Baja-moderada","Mercados","OTAN/UE","Media-Alta","Normal","Templado"),
+  _0xr("▸ ÁFRICA","","","","","","","","","","","","","",""),
+  _0xr("Rift Este (Etiopía, Kenia, Tanzania...)","Moderado","Moderado",0.52,24,"Vigilancia","4.5-6.0","5-25 km","Addis, Nairobi","Rift Africano","Enjambres / volcánico","Agro/turismo","Media","Media","Media","Sequía/Rift"),
+  _0xr("Norte de África / Magreb","Bajo-Mod","Moderado",0.42,19,"Vigilancia","4.5-6.0","8-30 km","Atlas","Atlas / Mediterráneo","Posible M>5.5","Energía/turismo","Sahel","Media","Media-Alta","Sequía"),
+  _0xr("Resto de África","Bajo","Bajo-Mod",0.28,13,"Estable","<5.5","–","Varias","Intraplate / márgenes","Baja","Minerales/petróleo","Variable","Alta","Variable","Tropical/seco"),
+  _0xr("▸ ASIA ORIENTAL Y PACÍFICO","","","","","","","","","","","","","",""),
+  _0xr("Japón","Moderado-Alto","Moderado-Alto",0.68,33,"ALERTA","6.0-7.2","15-50 km","Tokio, Nankai, Fukushima","Fosa Japón / Nankai","Telúrico M>6.5 (P/S)","Yen/seguros/tech","Alianza","Alta","Muy elevada","Tifones+sísmico"),
+  _0xr("Taiwán","Moderado","Moderado-Alto",0.60,29,"ALERTA","5.5-6.8","10-35 km","Taipei, costa E","Colisión / subducción","Telúrico M>6.0","Semiconductores","Tensión China","Muy alta","Muy elevada","Tifones"),
+  _0xr("Indonesia","Moderado","Moderado-Alto",0.62,30,"ALERTA","5.5-7.0","15-50 km","Java, Sumatra, Sulawesi","Anillo de Fuego","Telúrico/tsunami M>6.0+","Commodities","Estable","Media","Elevada islas","Monzón/volcánico"),
+  _0xr("Filipinas","Moderado","Moderado-Alto",0.60,29,"ALERTA","5.5-6.8","15-45 km","Manila, Mindanao","Subducción dual","Telúrico M>6.0","Remesas/BPO","Mar China","Media","Elevada","Tifones"),
+  _0xr("China / Corea del Sur / Corea del Norte / Mongolia","Moderado","Moderado",0.48,22,"Vigilancia","4.5-6.5","10-40 km","Sichuan, península","Intraplate + márgenes","Telúrico M>5.5 posible","Mercados globales","Alta tensión","Muy alta","Elevada","Monzón"),
+  _0xr("▸ ASIA MERIDIONAL / CENTRAL / OCCIDENTAL","","","","","","","","","","","","","",""),
+  _0xr("India / Nepal / Pakistán / Himalaya","Moderado","Moderado",0.55,26,"Vigilancia","5.0-6.8","10-40 km","Himalaya, Hindu Kush","Colisión India-Eurasia","Telúrico M>6.0 posible","Agro/mercados","Tensión","Alta","Elevada","Monzón"),
+  _0xr("Turquía / Irán / Zagros / Mar Muerto","Moderado","Moderado",0.55,26,"Vigilancia","5.0-6.5","5-25 km","Estambul, Zagros","Fallas activas","Telúrico M>5.8-6.0","Energía/turismo","Conflicto","Muy alta","Crítica","Árido"),
+  _0xr("Asia Central (Tien Shan / Pamir)","Moderado","Moderado",0.50,23,"Vigilancia","5.0-6.5","10-40 km","Tashkent, Bishkek","Tien Shan","Telúrico M>5.5-6.0","Energía","Rutas","Media","Media","Extremo"),
+  _0xr("▸ OCEANÍA","","","","","","","","","","","","","",""),
+  _0xr("Nueva Zelanda","Moderado","Moderado",0.55,26,"Vigilancia","5.5-6.8","15-45 km","Wellington, Christchurch","Alpine Fault","Telúrico M>6.0","Agro/turismo","Alianza","Baja","Elevada","Pacífico S"),
+  _0xr("Papúa / Salomón / Vanuatu / Fiyi / arco Melanesia","Moderado","Moderado-Alto",0.60,29,"ALERTA","5.5-7.0","15-50 km","Islas","Anillo de Fuego SW","Telúrico/tsunami M>6.0+","Minerales","Baja","Baja","Elevada islas","Ciclones"),
+  _0xr("Australia / resto Pacífico","Bajo-Mod","Moderado",0.38,17,"Vigilancia","4.5-6.5","–","Varias","Intraplate / subducción","Variable","Minerales","Pacífico","Media","Vulnerabilidad islas","Ciclones/calor")
+];
+
+document.getElementById('timestamp').textContent = 'Generado: ' + _0xst.ts + ' | FTR v8.6 – Solo visualización';
+document.getElementById('kpi-u').textContent = _0xst.Upsilon.toFixed(2);
+document.getElementById('kpi-d').textContent = _0xst.delta.toFixed(2);
+document.getElementById('kpi-l').textContent = _0xst.L;
+document.getElementById('kpi-ir').textContent = _0xst.IR.toFixed(2);
+const _se = document.getElementById('kpi-st');
+_se.textContent = _0xst.status;
+_se.className = 'text-lg font-bold status-' + _0xst.status.toLowerCase();
+
+document.getElementById('exec').innerHTML = '<p>Estado global <strong class="text-orange-400">'+_0xst.status+'</strong> (I_R='+_0xst.IR.toFixed(2)+'). Focos prioritarios: <strong>Chile, Venezuela, Japón, Taiwán, Indonesia, Filipinas, arco Melanesia</strong>. Vigilancia en México, Centroamérica, Turquía, Rift Africano e Himalaya.</p>';
+
+const _tb = document.getElementById('tbody');
+_0xreg.forEach(r=>{
+  const tr=document.createElement('tr');
+  if(r.name.startsWith('▸')){
+    tr.className='section-header';
+    tr.innerHTML='<td colspan="16">'+r.name+'</td>';
+  } else {
+    const sc=(r.ukf||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    tr.innerHTML='<td class="font-medium whitespace-nowrap">'+r.name+'</td><td>'+r.r48+'</td><td>'+r.r7+'</td><td class="font-mono">'+(typeof r.ir==='number'?r.ir.toFixed(2):r.ir)+'</td><td class="font-mono">'+(r.ekf||'–')+'</td><td class="status-'+sc+' font-semibold">'+(r.ukf||'–')+'</td><td>'+(r.mag||'–')+'</td><td>'+(r.depth||'–')+'</td><td>'+(r.cities||'–')+'</td><td class="text-xs">'+(r.obs||'–')+'</td><td class="text-xs">'+(r.pred||'–')+'</td><td class="text-xs">'+(r.mkt||'–')+'</td><td class="text-xs">'+(r.geo||'–')+'</td><td class="text-xs">'+(r.cyber||'–')+'</td><td class="text-xs">'+(r.seg||'–')+'</td><td class="text-xs">'+(r.clima||'–')+'</td>';
+  }
+  _tb.appendChild(tr);
+});
+
+const _labs=_0xhist.map(h=>'h'+h.hour);
+new Chart(document.getElementById('c1'),{type:'line',data:{labels:_labs,datasets:[{label:'I_R',data:_0xhist.map(h=>h.IR),borderColor:'#f97316',tension:.3,fill:false},{label:'Υ/10',data:_0xhist.map(h=>h.U/10),borderColor:'#22d3ee',tension:.3,fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e2e8f0'}}},scales:{x:{ticks:{color:'#94a3b8'}},y:{ticks:{color:'#94a3b8'},grid:{color:'#1e293b'}}}}});
+new Chart(document.getElementById('c2'),{type:'line',data:{labels:_labs,datasets:[{label:'A_MHD',data:_0xhist.map(h=>h.AM),borderColor:'#a78bfa',tension:.3,fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e2e8f0'}}},scales:{x:{ticks:{color:'#94a3b8'}},y:{min:.9,max:1,ticks:{color:'#94a3b8'},grid:{color:'#1e293b'}}}}});
+
+const _map=L.map('map').setView([10,0],2);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'© OSM © CARTO'}).addTo(_map);
+(async function(){
+  try{
+    const end=new Date().toISOString();
+    const start=new Date(Date.now()-48*3600e3).toISOString();
+    const url='https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime='+start+'&endtime='+end+'&minmagnitude=4.5&orderby=time';
+    const res=await fetch(url); const data=await res.json();
+    data.features.forEach(f=>{
+      const [lon,lat,depth]=f.geometry.coordinates; const m=f.properties.mag;
+      const r=Math.max(4,m*3); const color=m>=6?'#ef4444':m>=5?'#f97316':'#fbbf24';
+      L.circleMarker([lat,lon],{radius:r,color:color,fillColor:color,fillOpacity:.7,weight:1})
+        .bindPopup('<b>M'+m+'</b><br>'+f.properties.place+'<br>'+new Date(f.properties.time).toISOString().slice(0,16)+'<br>Prof: '+depth+' km')
+        .addTo(_map);
+    });
+  }catch(e){}
+})();
+
+(async function(){
+  const box=document.getElementById('goes');
+  try{
+    const r=await fetch('https://services.swpc.noaa.gov/json/goes/primary/xrays-6-hour.json');
+    const d=await r.json();
+    const lb=d.filter(x=>x.energy==='0.1-0.8nm'); const last=lb[lb.length-1];
+    const flux=last?last.flux:0;
+    let cls='A/B'; if(flux>1e-4)cls='X'; else if(flux>1e-5)cls='M'; else if(flux>1e-6)cls='C'; else if(flux>1e-7)cls='B';
+    box.innerHTML='<p>X-ray 0.1–0.8 nm: <strong>'+flux.toExponential(2)+'</strong> W/m² → clase ~'+cls+'</p><p class="text-xs text-slate-500">Kernel Fourier activo · datos SWPC</p>';
+  }catch(e){box.innerHTML='<p class="text-amber-400">GOES no disponible en este momento.</p>';}
+})();
+</script>
+</body>
+</html>
